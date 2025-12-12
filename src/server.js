@@ -1,0 +1,75 @@
+const express = require("express")
+const cors = require("cors")
+const { Server } = require("socket.io")
+const { createServer } = require("http")
+const { config } = require("./config/env")
+const { ClientManager } = require("./whatsapp/clientManager")
+const { createInstancesRouter } = require("./routes/instances")
+const { createMessagesRouter } = require("./routes/messages")
+const { createDashboardRouter } = require("./routes/dashboard")
+const { createWebhooksRouter } = require("./routes/webhooks")
+
+const app = express()
+const httpServer = createServer(app)
+
+const allowedOrigins = [config.server.frontendUrl, "http://localhost:3000", "https://3333-versao.vercel.app"].filter(
+  Boolean,
+)
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+})
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  }),
+)
+app.use(express.json())
+
+// Initialize WhatsApp Client Manager
+const clientManager = new ClientManager(io)
+
+// Health check
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "WhatsApp SaaS Backend is running" })
+})
+
+app.get("/health", (req, res) => {
+  res.json({ status: "healthy", timestamp: new Date().toISOString() })
+})
+
+// Routes
+app.use("/api/instances", createInstancesRouter(clientManager, io))
+app.use("/api/messages", createMessagesRouter(clientManager))
+app.use("/api/dashboard", createDashboardRouter())
+app.use("/api/webhooks", createWebhooksRouter())
+
+// Socket.IO connection handling
+io.on("connection", (socket) => {
+  console.log("Client connected:", socket.id)
+
+  socket.on("join-instance", (instanceId) => {
+    socket.join(`instance-${instanceId}`)
+    console.log(`Socket ${socket.id} joined instance-${instanceId}`)
+  })
+
+  socket.on("leave-instance", (instanceId) => {
+    socket.leave(`instance-${instanceId}`)
+  })
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id)
+  })
+})
+
+const PORT = config.server.port
+httpServer.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`)
+  console.log(`Frontend URL: ${config.server.frontendUrl}`)
+})
